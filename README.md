@@ -1,1 +1,1 @@
-# Obstacle-Rush-Prototype-
+# Obstacle-Rush-Prototype
