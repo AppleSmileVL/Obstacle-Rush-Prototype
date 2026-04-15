@@ -1,0 +1,18 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 364466b1197d6bf45ad25af8fd7cabd8, type: 3}
+  m_Name: Boost Pad
+  m_EditorClassIdentifier: 
+  boostForce: 20
+  forceMode: 2
+  boostSound: {fileID: 8300000, guid: de9df04bf892c8544afb6f1c054bb6e5, type: 3}
+  boostPadAudioMixerGroup: {fileID: -3830288229528375899, guid: 596c582196bfb0d41834f215d748da83, type: 2}
