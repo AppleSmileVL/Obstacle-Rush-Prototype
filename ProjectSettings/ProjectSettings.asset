@@ -961,11 +961,11 @@ PlayerSettings:
   apiCompatibilityLevel: 6
   activeInputHandler: 0
   windowsGamepadBackendHint: 0
-  cloudProjectId: 1a003c9c-5e96-471c-b19b-334c727d61a9
+  cloudProjectId: 
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames: []
-  projectName: Racing Prototype
-  organizationId: applesmile
+  projectName: "Racing Prototype"
+  organizationId: "applesmile"
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 0
   hmiLoadingImage: {fileID: 0}
