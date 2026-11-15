@@ -111,3 +111,6 @@ Desktop.ini
 
 # Temporary files
 *.tmp
+
+# Unity temporary files
+availableObjects*.Count
