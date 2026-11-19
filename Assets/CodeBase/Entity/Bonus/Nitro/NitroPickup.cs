@@ -1,7 +1,8 @@
 using System.Collections;
 using UnityEngine;
+using UnityEngine.Pool;
 
-public class NitroPickup : MonoBehaviour
+public class NitroPickup : MonoBehaviour, IDependency<Pauser>
 {
     [SerializeField] private NitroSettingAsset asset;
     [SerializeField] private float nitroAmount = 30f;
@@ -11,19 +12,145 @@ public class NitroPickup : MonoBehaviour
     [SerializeField] private float respawnDelay = 10f;
     [SerializeField] private bool destroyAfterPickup = false;
 
+    [Header("Pooling")]
+    [SerializeField] private int pickupEffectPoolSize = 4;
+    [SerializeField] private int nitroPickupSfxPoolSize = 2;
+
     private Collider pickupCollider;
     private Renderer[] renderers;
     private bool isPickedUp;
+    private bool isPaused;
+
+    private ObjectPool<GameObject> pickupEffectPool;
+    private ObjectPool<GameObject> nitroPickupSfxPool;
+    private Coroutine pickupEffectReleaseCoroutine;
+    private Coroutine nitroPickupSfxReleaseCoroutine;
+    private GameObject activePickupEffect;
+    private GameObject activeNitroPickupSfx;
+
+    private Pauser pauser;
+    public void Construct(Pauser obj) => pauser = obj;
 
     private void Awake()
     {
         pickupCollider = GetComponent<Collider>();
         renderers = GetComponentsInChildren<Renderer>(true);
+
+        pickupEffectPool = new ObjectPool<GameObject>(
+            createFunc: () => Instantiate(pickupEffect),
+            actionOnGet: (obj) =>
+            {
+                obj.SetActive(true);
+            },
+            actionOnRelease: (obj) =>
+            {
+                obj.SetActive(false);
+                var systems = obj.GetComponentsInChildren<ParticleSystem>(true);
+                foreach (var ps in systems)
+                {
+                    if (ps == null) continue;
+                    ps.Stop();
+                }
+            },
+            actionOnDestroy: (obj) => Destroy(obj),
+            collectionCheck: true,
+            defaultCapacity: pickupEffectPoolSize,
+            maxSize: pickupEffectPoolSize
+        );
+
+        nitroPickupSfxPool = new ObjectPool<GameObject>(
+            createFunc: () =>
+            {
+                var go = new GameObject("NitroPickup_SFX");
+                go.AddComponent<AudioSource>();
+                return go;
+            },
+            actionOnGet: (obj) =>
+            {
+                var audio = obj.GetComponent<AudioSource>();
+                if (audio == null) return;
+
+                audio.clip = asset != null ? asset.NitroPickupSound : null;
+                audio.playOnAwake = false;
+                audio.volume = 1f;
+                audio.pitch = 1f;
+                audio.spatialBlend = 0f;
+                audio.dopplerLevel = 0f;
+                audio.rolloffMode = AudioRolloffMode.Logarithmic;
+                if (asset != null && asset.NitroPickupAudioMixerGroup != null)
+                    audio.outputAudioMixerGroup = asset.NitroPickupAudioMixerGroup;
+
+                obj.SetActive(true);
+                audio.Play();
+            },
+            actionOnRelease: (obj) =>
+            {
+                var audio = obj.GetComponent<AudioSource>();
+                if (audio != null) audio.Stop();
+                obj.SetActive(false);
+            },
+            actionOnDestroy: (obj) => Destroy(obj),
+            collectionCheck: true,
+            defaultCapacity: nitroPickupSfxPoolSize,
+            maxSize: nitroPickupSfxPoolSize
+        );
+
+        if (pauser != null)
+        {
+            pauser.PauseStateChanged += OnPauseStateChanged;
+        }
+    }
+
+    private void OnDisable()
+    {
+        if (pickupEffectReleaseCoroutine != null)
+        {
+            StopCoroutine(pickupEffectReleaseCoroutine);
+            pickupEffectReleaseCoroutine = null;
+        }
+
+        if (nitroPickupSfxReleaseCoroutine != null)
+        {
+            StopCoroutine(nitroPickupSfxReleaseCoroutine);
+            nitroPickupSfxReleaseCoroutine = null;
+        }
+
+        if (activePickupEffect != null)
+        {
+            pickupEffectPool.Release(activePickupEffect);
+            activePickupEffect = null;
+        }
+
+        if (activeNitroPickupSfx != null)
+        {
+            nitroPickupSfxPool.Release(activeNitroPickupSfx);
+            activeNitroPickupSfx = null;
+        }
+    }
+
+    private void OnDestroy()
+    {
+        if (pauser != null)
+        {
+            pauser.PauseStateChanged -= OnPauseStateChanged;
+        }
+
+        if (pickupEffectReleaseCoroutine != null) StopCoroutine(pickupEffectReleaseCoroutine);
+        if (nitroPickupSfxReleaseCoroutine != null) StopCoroutine(nitroPickupSfxReleaseCoroutine);
+
+        pickupEffectPool?.Dispose();
+        nitroPickupSfxPool?.Dispose();
+    }
+
+    private void OnPauseStateChanged(bool pause)
+    {
+        isPaused = pause;
     }
 
     private void OnTriggerEnter(Collider other)
     {
         if (isPickedUp) return;
+        if (isPaused) return;
 
         var nitroSystem = other.GetComponentInParent<Nitro>();
         if (nitroSystem == null) return;
@@ -68,8 +195,9 @@ public class NitroPickup : MonoBehaviour
 
     private void SpawnPickupEffect()
     {
-        var spawned = Instantiate(pickupEffect, transform.position, Quaternion.identity);
-        if (!spawned.activeSelf) spawned.SetActive(true);
+        var spawned = pickupEffectPool.Get();
+        activePickupEffect = spawned;
+        spawned.transform.position = transform.position;
 
         var systems = spawned.GetComponentsInChildren<ParticleSystem>(true);
         float maxLifetime = 0f; 
@@ -105,7 +233,21 @@ public class NitroPickup : MonoBehaviour
         }
 
         if (maxLifetime <= 0f) maxLifetime = 5f;
-        Destroy(spawned, maxLifetime + 0.1f);
+
+        if (pickupEffectReleaseCoroutine != null) StopCoroutine(pickupEffectReleaseCoroutine);
+        pickupEffectReleaseCoroutine = StartCoroutine(ReleasePickupEffect(spawned, maxLifetime + 0.1f));
+    }
+
+    private IEnumerator ReleasePickupEffect(GameObject spawned, float delay)
+    {
+        yield return new WaitForSecondsRealtime(delay);
+
+        if (activePickupEffect == spawned)
+        {
+            activePickupEffect = null;
+            pickupEffectPool.Release(spawned);
+        }
+        pickupEffectReleaseCoroutine = null;
     }
 
     private void PlayPickupSound()
@@ -113,21 +255,22 @@ public class NitroPickup : MonoBehaviour
         if (asset == null || asset.NitroPickupSound == null) return;
 
         var clip = asset.NitroPickupSound;
-        var go = new GameObject("NitroPickup_SFX");
-        go.transform.position = transform.position;
-        var audio = go.AddComponent<AudioSource>();
-        audio.clip = clip;
-        audio.playOnAwake = false;
-        audio.volume = 1f;
-        audio.pitch = 1f;
-        audio.spatialBlend = 0f;
-        audio.dopplerLevel = 0f;
-        audio.rolloffMode = AudioRolloffMode.Logarithmic;
+        var go = nitroPickupSfxPool.Get();
+        activeNitroPickupSfx = go;
 
-        if (asset.NitroPickupAudioMixerGroup != null)
-            audio.outputAudioMixerGroup = asset.NitroPickupAudioMixerGroup;
+        if (nitroPickupSfxReleaseCoroutine != null) StopCoroutine(nitroPickupSfxReleaseCoroutine);
+        nitroPickupSfxReleaseCoroutine = StartCoroutine(ReleasePickupSound(go, clip.length + 0.1f));
+    }
 
-        audio.Play();
-        Destroy(go, clip.length + 0.1f);
+    private IEnumerator ReleasePickupSound(GameObject go, float delay)
+    {
+        yield return new WaitForSecondsRealtime(delay);
+
+        if (activeNitroPickupSfx == go)
+        {
+            activeNitroPickupSfx = null;
+            nitroPickupSfxPool.Release(go);
+        }
+        nitroPickupSfxReleaseCoroutine = null;
     }
 }
